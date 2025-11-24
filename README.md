@@ -42,3 +42,11 @@ idf.py -p /dev/ttyUSB0 flash monitor
 ```json
 {"mac":"46:45:00:00:19:22","name":"BR","data":"0303A5270308425208FF401D0701E24BF2","voltage":2.9,"temperature_c":7.0,"pressure_psi":33.71}
 ```
+`ble/scanner/data/46:23:00:00:02:42/debug`
+```json
+{"mac":"46:23:00:00:02:42","name":"BR","data":"0303A5270308425208FF101D0801E67FC0","voltage":2.9,"temperature_c":8.0,"pressure_psi":34.11}
+```
+```json
+`ble/scanner/data/46:45:00:00:19:22/debug`
+{"mac":"46:45:00:00:19:22","name":"BR","data":"0303A5270308425208FF401D0601DD0779","voltage":2.9,"temperature_c":6.0,"pressure_psi":33.21}
+```
