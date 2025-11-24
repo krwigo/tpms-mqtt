@@ -16,6 +16,9 @@ jobs:
         with:
           submodules: true
 
+      - name: Ensure consts.h exists
+        run: cp -n main/consts.sample.h main/consts.h
+
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -23,6 +26,16 @@ jobs:
           target: esp32c3
           path: .
           command: idf.py build
+
+      # - name: Install ESP-IDF
+      #   uses: espressif/install-esp-idf-action@v1
+      #   with:
+      #     version: "v5.5"
+
+      # - name: Build firmware
+      #   run: |
+      #     idf.py set-target esp32c3
+      #     idf.py build
 
       - name: Upload firmware binaries
         uses: actions/upload-artifact@v4
