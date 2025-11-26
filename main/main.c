@@ -106,6 +106,7 @@ static void cache_update(const char *mac, const char *json) {
   for (int i = 0; i < MAX_DEVICES; i++) {
     if (!device_cache[i].valid) {
       strncpy(device_cache[i].mac, mac, sizeof(device_cache[i].mac));
+      device_cache[i].mac[sizeof(device_cache[i].mac) - 1] = '\0';
       strncpy(device_cache[i].json, json, sizeof(device_cache[i].json) - 1);
       device_cache[i].json[sizeof(device_cache[i].json) - 1] = '\0';
       device_cache[i].valid = true;
@@ -115,6 +116,7 @@ static void cache_update(const char *mac, const char *json) {
 
   ESP_LOGW(TAG, "Device cache full, overwriting index 0");
   strncpy(device_cache[0].mac, mac, sizeof(device_cache[0].mac));
+  device_cache[0].mac[sizeof(device_cache[0].mac) - 1] = '\0';
   strncpy(device_cache[0].json, json, sizeof(device_cache[0].json) - 1);
   device_cache[0].json[sizeof(device_cache[0].json) - 1] = '\0';
   device_cache[0].valid = true;
@@ -191,55 +193,41 @@ static const char *extract_device_name(const uint8_t *adv_data,
   return "";
 }
 
-static char *format_advertisement_as_json(const char *mac_str,
-                                          const char *device_name,
-                                          const uint8_t *adv_data,
-                                          uint8_t adv_data_len,
-                                          char *json_buffer) {
-  char adv_data_str[MAX_ADV_DATA_LEN * 2 + 1];
-  bin_to_hex_string(adv_data, adv_data_len, adv_data_str);
-
-  sensor_data_t sensor = parse_sensor_payload_app(adv_data, adv_data_len);
-
-  if (sensor.valid) {
-    snprintf(json_buffer, MAX_JSON_BUFFER_SIZE,
-             "{\"mac\":\"%s\",\"name\":\"%s\",\"data\":\"%s\",\"voltage\":%.1f,"
-             "\"temperature_c\":%.1f,\"pressure_psi\":%.2f}\n",
-             mac_str, device_name, adv_data_str, sensor.voltage,
-             sensor.temperature_c, sensor.pressure_psi);
-  } else {
-    snprintf(json_buffer, MAX_JSON_BUFFER_SIZE,
-             "{\"mac\":\"%s\",\"name\":\"%s\",\"data\":\"%s\"}\n", mac_str,
-             device_name, adv_data_str);
-  }
-
-  return json_buffer;
-}
-
 static void send_advertisement_to_mqtt(const uint8_t *mac_address,
                                        const char *device_name,
                                        const uint8_t *adv_data,
-                                       uint8_t adv_data_len) {
+                                        uint8_t adv_data_len) {
+  sensor_data_t sensor = parse_sensor_payload_app(adv_data, adv_data_len);
+  if (!sensor.valid) {
+    return;
+  }
+
   char mac_str[18];
   format_mac_address(mac_address, mac_str);
 
+  char adv_data_str[MAX_ADV_DATA_LEN * 2 + 1];
+  bin_to_hex_string(adv_data, adv_data_len, adv_data_str);
+
   char json_buffer[MAX_JSON_BUFFER_SIZE];
-  char *json_string = format_advertisement_as_json(
-      mac_str, device_name, adv_data, adv_data_len, json_buffer);
-  int json_len = strlen(json_string);
+  int json_len =
+      snprintf(json_buffer, sizeof(json_buffer),
+               "{\"mac\":\"%s\",\"name\":\"%s\",\"data\":\"%s\",\"voltage\":%.1f,"
+               "\"temperature_c\":%.1f,\"pressure_psi\":%.2f}\n",
+               mac_str, device_name, adv_data_str, sensor.voltage,
+               sensor.temperature_c, sensor.pressure_psi);
 
   char topic_buffer[128];
-  snprintf(topic_buffer, sizeof(topic_buffer), "ble/scanner/data/%s/debug",
+  snprintf(topic_buffer, sizeof(topic_buffer), "ble/scanner/data/%s",
            mac_str);
 
   if (!mqtt_client || !mqtt_connected) {
     if (device_name && strcmp(device_name, "BR") == 0) {
-      cache_update(mac_str, json_string);
+      cache_update(mac_str, json_buffer);
     }
     return;
   }
 
-  esp_mqtt_client_publish(mqtt_client, topic_buffer, json_string, json_len, 1,
+  esp_mqtt_client_publish(mqtt_client, topic_buffer, json_buffer, json_len, 1,
                           0);
 }
 
@@ -267,13 +255,13 @@ static void send_all_cached_to_mqtt(void) {
   }
 }
 
-static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
+static void mqtt_event_handler(void *handler_args __attribute__((unused)),
+                               esp_event_base_t base,
                                int32_t event_id, void *event_data) {
-  esp_mqtt_client_handle_t client = (esp_mqtt_client_handle_t)handler_args;
   esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
 
   ESP_LOGD(TAG, "MQTT event base=%s id=%ld client=%p", base, (long)event_id,
-           client);
+           mqtt_client);
 
   switch (event_id) {
   case MQTT_EVENT_CONNECTED:
@@ -311,45 +299,21 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
   update_led_state();
 }
 
-/* future 1:
-static uint8_t retry_count = 0;
-
-static void wifi_reconnect_task(void *pvParameters) {
-        uint32_t delay_ms = (uint32_t)pvParameters;
-        // esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
-        esp_wifi_stop();
-        vTaskDelay(pdMS_TO_TICKS(delay_ms));
-        esp_wifi_start();
-        vTaskDelete(NULL);
-}
-
-retry_count += 1;
-if (retry_count <= 3) esp_wifi_connect();
-else xTaskCreate(wifi_reconnect_task, "wifi_reconnect_task", 2048,
-(void*)backoff, tskIDLE_PRIORITY, NULL);
-*/
-
-/* future 2:
-if (wifi_retry_timer == NULL) wifi_retry_timer = xTimerCreate("wifi_retry",
-pdMS_TO_TICKS(5000), pdFALSE, NULL, wifi_retry_callback);
-xTimerStart(wifi_retry_timer, 0);  // 5 sec
-*/
-
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data) {
-  bool *connected = (bool *)arg;
+static void wifi_event_handler(void *arg __attribute__((unused)),
+                               esp_event_base_t event_base, int32_t event_id,
+                               void *event_data) {
 
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
     esp_wifi_connect();
   } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
-    *connected = true;
+    wifi_connected = true;
     ESP_LOGI(TAG, "WIFI_EVENT_STA_CONNECTED");
   } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
     ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
   } else if (event_base == WIFI_EVENT &&
              event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    *connected = false;
+    wifi_connected = false;
     ESP_LOGW(TAG, "WIFI_EVENT_STA_DISCONNECTED");
     esp_wifi_connect();
   }
@@ -445,10 +409,9 @@ static void init_wifi(void) {
   esp_event_handler_instance_t instance_any_id;
   esp_event_handler_instance_t instance_got_ip;
   ESP_ERROR_CHECK(esp_event_handler_instance_register(
-      WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, &wifi_connected,
-      &instance_any_id));
+      WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &instance_any_id));
   ESP_ERROR_CHECK(esp_event_handler_instance_register(
-      IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, &wifi_connected,
+      IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL,
       &instance_got_ip));
   wifi_config_t wifi_config = {
       .sta =
@@ -488,7 +451,7 @@ static void init_mqtt(void) {
   }
 
   esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID,
-                                 mqtt_event_handler, mqtt_client);
+                                 mqtt_event_handler, NULL);
   esp_mqtt_client_start(mqtt_client);
 }
 
