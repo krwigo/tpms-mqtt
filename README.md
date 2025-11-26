@@ -74,8 +74,9 @@ idf.py -p /dev/ttyUSB0 flash monitor
 }
 ```
 
-```json
 `ble/scanner/data/46:45:00:00:19:22`
+
+```json
 {
   "mac": "46:45:00:00:19:22",
   "name": "BR",
